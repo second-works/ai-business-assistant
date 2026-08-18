@@ -1,0 +1,24 @@
+# dependencies
+node_modules/
+
+# Next.js
+.next/
+out/
+
+# OpenNext / Cloudflare build output
+.open-next/
+.wrangler/
+.playwright-cli/
+output/playwright/
+
+# TypeScript incremental cache
+*.tsbuildinfo
+
+# local environment files
+.env*
+!.env.example
+
+# local tooling
+*.log
+.DS_Store
+.bm25/
