@@ -136,10 +136,23 @@ APIキーやAccess SecretはGitへ保存せず、公開環境ではWrangler Secr
 
 ## 検証と公開
 
+型チェックと本番ビルドを実行します。
+
 ~~~bash
 npm run typecheck
 npm run build
+~~~
+
+Cloudflare Workersへ初めて公開する場合は、必要なSecretを登録してからデプロイします。
+
+~~~bash
+npx wrangler secret put OPENAI_API_KEY
+
+# Cloudflare Access Service Authを使う場合
+npx wrangler secret put LLM_ACCESS_CLIENT_ID
+npx wrangler secret put LLM_ACCESS_CLIENT_SECRET
+
 npm run deploy
 ~~~
 
-Cloudflare Tunnelや専用LLMブリッジを別環境へ移植する場合は、[ポートフォリオ向け説明書](docs/PORTFOLIO_GUIDE.md)の構成、Secret管理、入力制限、運用上の注意を確認してください。
+<code>OPENAI_BASE_URL</code> と <code>OPENAI_MODEL</code> は接続先に合わせて <code>wrangler.jsonc</code> で設定します。Cloudflare Tunnelや専用LLMブリッジを別環境へ移植する場合は、[ポートフォリオ向け説明書](docs/PORTFOLIO_GUIDE.md)の構成、Secret管理、入力制限、運用上の注意を確認してください。
