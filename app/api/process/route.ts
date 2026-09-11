@@ -2,6 +2,7 @@ import { getCloudflareContext } from "@opennextjs/cloudflare";
 import { NextResponse } from "next/server";
 
 type Action = "summary" | "improve" | "tasks";
+type RequestBody = { action?: unknown; text?: unknown };
 
 const MAX_INPUT_LENGTH = 8000;
 const MAX_REQUEST_BYTES = 64 * 1024;
@@ -33,6 +34,62 @@ function jsonError(message: string, status: number) {
     { error: message },
     { status, headers: { "Cache-Control": "no-store" } },
   );
+}
+
+async function parseRequestBody(
+  request: Request,
+): Promise<{ body?: RequestBody; error?: NextResponse }> {
+  const reader = request.body?.getReader();
+
+  if (!reader) {
+    return { error: jsonError("リクエストの形式が正しくありません。", 400) };
+  }
+
+  const chunks: Uint8Array[] = [];
+  let totalBytes = 0;
+
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) {
+        break;
+      }
+
+      if (!value) {
+        continue;
+      }
+
+      totalBytes += value.byteLength;
+      if (totalBytes > MAX_REQUEST_BYTES) {
+        await reader.cancel().catch(() => undefined);
+        return {
+          error: jsonError(
+            "リクエストが大きすぎます。文章を短くしてお試しください。",
+            413,
+          ),
+        };
+      }
+
+      chunks.push(value);
+    }
+  } catch {
+    return { error: jsonError("リクエストの形式が正しくありません。", 400) };
+  }
+
+  const bytes = new Uint8Array(totalBytes);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+
+  try {
+    return {
+      body: JSON.parse(new TextDecoder().decode(bytes)) as RequestBody,
+    };
+  } catch {
+    return { error: jsonError("リクエストの形式が正しくありません。", 400) };
+  }
 }
 
 async function enforceRateLimit(request: Request): Promise<NextResponse | null> {
@@ -77,20 +134,21 @@ export async function POST(request: Request) {
     return rateLimitResponse;
   }
 
-  const contentLength = Number(request.headers.get("content-length"));
-  if (Number.isFinite(contentLength) && contentLength > MAX_REQUEST_BYTES) {
-    return jsonError("リクエストが大きすぎます。文章を短くしてお試しください。", 413);
+  const contentLengthHeader = request.headers.get("content-length");
+  if (contentLengthHeader !== null) {
+    const contentLength = Number(contentLengthHeader);
+    if (Number.isFinite(contentLength) && contentLength > MAX_REQUEST_BYTES) {
+      return jsonError("リクエストが大きすぎます。文章を短くしてお試しください。", 413);
+    }
   }
 
-  let body: { action?: unknown; text?: unknown };
-
-  try {
-    body = (await request.json()) as { action?: unknown; text?: unknown };
-  } catch {
-    return jsonError("リクエストの形式が正しくありません。", 400);
+  const parsed = await parseRequestBody(request);
+  if (parsed.error) {
+    return parsed.error;
   }
+  const body = parsed.body;
 
-  if (!isAction(body.action)) {
+  if (!body || !isAction(body.action)) {
     return jsonError("実行する処理を正しく指定してください。", 400);
   }
 
@@ -100,7 +158,10 @@ export async function POST(request: Request) {
 
   const text = body.text.trim();
   if (text.length > MAX_INPUT_LENGTH) {
-    return jsonError(`入力は${MAX_INPUT_LENGTH.toLocaleString()}文字以内にしてください。`, 413);
+    return jsonError(
+      "入力は" + MAX_INPUT_LENGTH.toLocaleString() + "文字以内にしてください。",
+      413,
+    );
   }
 
   const apiKey = process.env.OPENAI_API_KEY;
@@ -120,10 +181,10 @@ export async function POST(request: Request) {
   const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
 
   try {
-    const response = await fetch(`${baseUrl}/chat/completions`, {
+    const response = await fetch(baseUrl + "/chat/completions", {
       method: "POST",
       headers: {
-        Authorization: `Bearer ${apiKey}`,
+        Authorization: "Bearer " + apiKey,
         "Content-Type": "application/json",
         ...(accessClientId && accessClientSecret
           ? {
